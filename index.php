@@ -24,13 +24,6 @@ $database_username = "sa";
 $database_password = "eFilmWS30";
 $database_port = "";
 
-$dicom_config=array(
-		"GDMTAR"=>'C:\soft\dicom\GDCM-2.4.0-Windows-x86\bin\gdcmtar.exe'
-		,"DCMODIFY"=>'C:\soft\dicom\dcmtk-3.6.0-win32-i386\bin\dcmodify.exe'
-		,"DICOMROOT"=>'\\\dev-srv2\dicom'
-		,"OUTDIR"=>'\\\dev-srv2\temp\out'
-		);
-
 $debug=0;
 /* display ALL errors */
 error_reporting(E_ALL);
@@ -112,7 +105,11 @@ function display_search_form()
 if (isset($_REQUEST['phpinfo']))
 {
 	phpinfo();
-	//die( "exit!" );
+	die( "exit!" );
+}
+if (isset($_REQUEST['debug']))
+{
+	$debug=1;
 }
 
 $connectionInfo = array( "UID"=>$database_username,
@@ -412,6 +409,7 @@ where SeriesInstanceUID='".$uid."'";
 function process_series2($conn,$uid)
 {
 	global $dicom_config;
+	global $debug;
 	$uid=trim(sanitize_search_string($uid));
 
 	if(strlen($uid)>0)
@@ -429,28 +427,36 @@ function process_series2($conn,$uid)
 	$StudyInstanceUID="";
 	$FrameOfReferenceUID="";
 	$PatientsName="";
-
+	
 	$tsql="SELECT top 1
-Patient.[PatientID]
-      ,Patient.[PatientsName]
+	   Patient.[PatientID]
+	  ,Patient.[PatientsName]
       ,Patient.[PatientsBirthDate]
       ,Patient.[PatientsSex]
       ,Patient.[PatientUID]
 
       ,Study.[StudyInstanceUID]
       ,Study.[StudyDate]
+	  ,Study.StudyTime
       ,Study.[StudyID]
       ,Study.[AccessionNumber]
       ,Study.[Modality]
 
+,Series.SeriesDate
+,Series.SeriesTime
 ,Series.SeriesNumber
 ,Series.ProtocolName
 ,Series.SeriesDescription
+,Series.BodyPartExamined
+,Series.PatientPosition
 ,Series.SeriesInstanceUID
 ,Series.FrameOfReferenceUID
-,SOPInstanceUID
 
-  FROM Patient
+,Image.SOPInstanceUID
+,Image.Manufacturer				
+,Image.ManufacturersModelName
+			
+FROM Patient
 join Study on Study.PatientUID=Patient.PatientUID
 join Series on Study.StudyInstanceUID=ReferencedStudyComponent
 join Image on Image.SeriesInstanceUID=Series.SeriesInstanceUID
@@ -490,7 +496,7 @@ where Image.SeriesInstanceUID='".$uid."'";
 	sqlsrv_free_stmt( $stmt);
 	
 	$row=$res;
-	print_r($row);
+	//print_r($row);
 
 	echo "SOPInstanceUID=".$SOPInstanceUID." <br>\n";
 	echo "SeriesInstanceUID=".$SeriesInstanceUID." <br>\n";
@@ -507,7 +513,7 @@ where Image.SeriesInstanceUID='".$uid."'";
 	//gdcmtar -V -i %src% -o %dst%
 		
 	$src=$dicom_config["DICOMROOT"]."\\".$StudyInstanceUID."\\".$SeriesInstanceUID;
-	$dst=$dicom_config["OUTDIR"];
+	$dst=$dicom_config["TEMPDIR"];
 	
 	$cmd=$dicom_config["GDMTAR"]." -D -i ".$src." -o ".$dst." 2>&1";
 	echo "<br>cmd=".$cmd;
@@ -516,11 +522,11 @@ where Image.SeriesInstanceUID='".$uid."'";
 	echo "<p>$output</p>";
 	
 	
-	$cmd="dir /b ".$dicom_config["OUTDIR"]."\\".$StudyInstanceUID."\\".$SeriesInstanceUID."\\".$FrameOfReferenceUID;
-	$output = shell_exec($cmd);
-	echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
+	//$cmd="dir /b ".$dicom_config["TEMPDIR"]."\\".$StudyInstanceUID."\\".$SeriesInstanceUID."\\".$FrameOfReferenceUID;
+	//$output = shell_exec($cmd);
+	//echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
 	
-	$filename=$dicom_config["OUTDIR"]."\\".$StudyInstanceUID."\\".$SeriesInstanceUID."\\".$FrameOfReferenceUID."\\new.dcm";
+	$filename=$dicom_config["TEMPDIR"]."\\".$StudyInstanceUID."\\".$SeriesInstanceUID."\\".$FrameOfReferenceUID."\\new.dcm";
 	
 	if(!file_exists($filename))
 	{
@@ -528,13 +534,6 @@ where Image.SeriesInstanceUID='".$uid."'";
 		return;
 	}
 	
-	
-	"
-			(0008,0030)	StudyTime
-			(0008,0031)	SeriesTime
-			(0018,0015)	BodyPartExamined	
-			(0018,5100)	PatientPosition	
-			";
 	$tags=array(
 			"PatientsName"=>'0010,0010'
 			,"PatientID"=>'0010,0020'
@@ -542,20 +541,46 @@ where Image.SeriesInstanceUID='".$uid."'";
 			,"PatientsSex"=>'0010,0040'
 			
 			,"StudyDate"=>'0008,0020'
+			,"SeriesDate"=>'0008,0021'
+			,"StudyTime"=>'0008,0030'
+			,"SeriesTime"=>'0008,0031'
+			,"Manufacturer"=>'0008,0070'
+			,"ManufacturersModelName"=>'0008,1090'
 			,"SeriesDescription"=>'0008,103E'
 			,"AccessionNumber"=>'0008,0050'
 			
+			,"BodyPartExamined"=>'0018,0015'
 			,"ProtocolName"=>'0018,1030'
+			,"PatientPosition"=>'0018,5100'
 			
 			,"StudyInstanceUID"=>'0020,000D'
 			,"SeriesInstanceUID"=>'0020,000E'
 			,"StudyID"=>'0020,0010'			
 			,"SeriesNumber"=>'0020,0011'
-			,"FrameOfReferenceUID"=>'0020,0052'			
+			,"FrameOfReferenceUID"=>'0020,0052'	
 	);
 	//dcmodify -i "(0010,0010)=A Name" new.dcm
 	
+	foreach ($tags as $fname=>$field)
+	{
+		if(strlen($field)>0 &&
+				isset($row[$fname]) && 
+				strlen($row[$fname])>0)
+		{
+			//echo $fname.'->'.$field."=".$row[$fname]."<br>";
+			$cmd=$dicom_config["DCMODIFY"].' -i "('.$field.')='.$row[$fname].'" '.$filename." 2>&1";
+						
+			$output = shell_exec($cmd);
+			if($debug)
+			{
+				echo "<br>cmd=".$cmd; 
+				echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
+			}
+			
+		}
+	}
 	
+	/*
 	if(strlen($PatientsName)>0)
 	{
 		$cmd=$dicom_config["DCMODIFY"].' -i "(0010,0010)='.$PatientsName.'" '.$filename." 2>&1";
@@ -564,71 +589,20 @@ where Image.SeriesInstanceUID='".$uid."'";
 		$output = shell_exec($cmd);
 		echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
 	}
-	//(0008,0020)	StudyDate
-	if(strlen($row["StudyDate"])>0)
-	{
-		$cmd=$dicom_config["DCMODIFY"].' -i "(0008,0020)='.$row["StudyDate"].'" '.$filename." 2>&1";
-		echo "<br>cmd=".$cmd;
-	
-		$output = shell_exec($cmd);
-		echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
-	}
-	//SeriesDescription (0008,103E)
-	if(strlen($row["SeriesDescription"])>0)
-	{
-		$cmd=$dicom_config["DCMODIFY"].' -i "(0008,103E)='.$row["SeriesDescription"].'" '.$filename." 2>&1";
-		echo "<br>cmd=".$cmd;
-	
-		$output = shell_exec($cmd);
-		echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
-	}
-	//ProtocolName (0018,1030)
-	if(strlen($row["ProtocolName"])>0)
-	{
-		$cmd=$dicom_config["DCMODIFY"].' -i "(0018,1030)='.$row["ProtocolName"].'" '.$filename." 2>&1";
-		echo "<br>cmd=".$cmd;
-	
-		$output = shell_exec($cmd);
-		echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
-	}
+	*/
 	
 	//moving file
-	$cmd='move '.$filename .' "'.$dicom_config["OUTDIR"]."\\".$PatientsName. '.dcm" 2>&1';
+	$cmd='copy '.$filename .' "'.$dicom_config["OUTDIR"]."\\"
+						.$PatientsName." "
+						.$row["StudyDate"]." "
+						.$row["SeriesDescription"]
+						.'.dcm" 2>&1';
 	echo "<br>cmd=".$cmd;
 	
 	$output = shell_exec($cmd);
 	echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
 	
 }
-
-function get_month_records_count($conn)
-{
-
-	$tsql="select count(*) from [PDPRegStorage].[ut].[ut_PolReg_UsReg] usreg";
-
-	$stmt = sqlsrv_query($conn, $tsql);
-
-	if( $stmt === false)
-	{
-		echo "Error in query preparation/execution.\n";
-		die( FormatErrors( sqlsrv_errors() ) );
-	}
-
-	if(sqlsrv_has_rows($stmt))
-	{
-		/* Retrieve each row as an associative array and display the results.*/
-		while( $row = sqlsrv_fetch_array( $stmt, SQLSRV_FETCH_ASSOC))
-		{
-			foreach ($row as $field)
-			{
-				return $field;
-			}
-		}
-	}
-	/* Free statement and connection resources. */
-	sqlsrv_free_stmt( $stmt);
-}
-
 
 
 function get_column_visibility($name, $default = 1)
