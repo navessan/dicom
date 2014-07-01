@@ -31,6 +31,7 @@ error_reporting(E_ALL);
 /* Include configuration */
 include("config.php");
 
+require_once "lib/nanodicom-1.3/nanodicom.php";
 
 /* Display errors. */
 function FormatErrors( $errors )
@@ -159,7 +160,8 @@ $fields_array=array(
 $fields_search_array=array(
 array("post"=>'PatientID',"sql"=>'Patient.PatientID',"name"=>"PatientID","value"=>"","html"=>"<br>","type"=>"text"),
 array("post"=>'PatientsName',"sql"=>"PatientsName","name"=>"PatientsName","value"=>"","type"=>"text"),
-array("post"=>'StudyDate',"sql"=>"StudyDate","name"=>"StudyDate","value"=>"","type"=>"text")
+array("post"=>'StudyDate',"sql"=>"StudyDate","name"=>"StudyDate","value"=>"","type"=>"text"),
+array("post"=>'ProtocolName',"sql"=>"ProtocolName","name"=>"ProtocolName","value"=>"","html"=>"<br>","type"=>"text")		
 );
 
 
@@ -533,7 +535,7 @@ where Image.SeriesInstanceUID='".$uid."'";
 		echo "file ".$filename." not created!";
 		return;
 	}
-	
+		
 	$tags=array(
 			"PatientsName"=>'0010,0010'
 			,"PatientID"=>'0010,0020'
@@ -544,41 +546,37 @@ where Image.SeriesInstanceUID='".$uid."'";
 			,"SeriesDate"=>'0008,0021'
 			,"StudyTime"=>'0008,0030'
 			,"SeriesTime"=>'0008,0031'
+			,"AccessionNumber"=>'0008,0050'
 			,"Manufacturer"=>'0008,0070'
+			,"InstitutionName"=>'0008,0080'
 			,"ManufacturersModelName"=>'0008,1090'
 			,"SeriesDescription"=>'0008,103E'
-			,"AccessionNumber"=>'0008,0050'
 			
 			,"BodyPartExamined"=>'0018,0015'
+			,"ScanOptions"=>'0018,0022'
+			,"SliceThickness"=>'0018,0050'
+			,"KVP"=>'0018,0060'
+			,"DataCollectionDiameter"=>'0018,0090'
 			,"ProtocolName"=>'0018,1030'
+			,"ReconstructionDiameter"=>'0018,1100'
+			,"ExposureTime"=>'0018,1150'
+			,"XRayTubeCurrent"=>'0018,1151'
+			,"Exposure"=>'0018,1152'
+			,"GeneratorPower"=>'0018,1170'
 			,"PatientPosition"=>'0018,5100'
 			
 			,"StudyInstanceUID"=>'0020,000D'
 			,"SeriesInstanceUID"=>'0020,000E'
 			,"StudyID"=>'0020,0010'			
 			,"SeriesNumber"=>'0020,0011'
+			,"InstanceNumber"=>'0020,0013'
 			,"FrameOfReferenceUID"=>'0020,0052'	
 	);
-	//dcmodify -i "(0010,0010)=A Name" new.dcm
 	
-	foreach ($tags as $fname=>$field)
-	{
-		if(strlen($field)>0 &&
-				isset($row[$fname]) && 
-				strlen($row[$fname])>0)
-		{
-			//echo $fname.'->'.$field."=".$row[$fname]."<br>";
-			$cmd=$dicom_config["DCMODIFY"].' -i "('.$field.')='.$row[$fname].'" '.$filename." 2>&1";
-						
-			$output = shell_exec($cmd);
-			if($debug)
-			{
-				echo "<br>cmd=".$cmd; 
-				echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
-			}
-			
-		}
-	}
+	$src=$dicom_config["DICOMROOT"]."\\".$StudyInstanceUID."\\".$SeriesInstanceUID."\\".$SOPInstanceUID.".dcm";
+	
+	//copy_dicom_tags($src, $filename, $tags);
+	copy_dicom_tags_with_modify($src, $filename, $tags);
 	
 	/*
 	if(strlen($PatientsName)>0)
@@ -594,7 +592,7 @@ where Image.SeriesInstanceUID='".$uid."'";
 	//moving file
 	$cmd='copy '.$filename .' "'.$dicom_config["OUTDIR"]."\\"
 						.$PatientsName." "
-						.$row["StudyDate"]." "
+						//.$row["StudyDate"]." "
 						.$row["SeriesDescription"]
 						.'.dcm" 2>&1';
 	echo "<br>cmd=".$cmd;
@@ -604,6 +602,148 @@ where Image.SeriesInstanceUID='".$uid."'";
 	
 }
 
+function copy_dicom_tags($src_file, $dst_file, $tags)
+{
+	if(strlen($src_file)==0 
+			|| strlen($dst_file)==0
+			|| ! is_array($tags))
+		return;
+	
+	$src_dicom=null;
+	$dst_dicom=null;
+		
+	try
+	{
+		$src_dicom = Nanodicom::factory($src_file);
+		$src_dicom->parse();
+		
+		//$src_dicom->extend('dumper');
+		//echo $src_dicom->parse()->dump('html');
+		
+		$dst_dicom = Nanodicom::factory($dst_file);
+		$dst_dicom->parse();
+		
+		echo 'SRC Is DICOM? '.$src_dicom->is_dicom()."<br>\n";
+		echo 'DST Is DICOM? '.$dst_dicom->is_dicom()."<br>\n";
+		
+		echo 'Patient Name: '.$src_dicom->value(0x0010, 0x0010)."<br>\n"; // Patient Name if exists
+		echo 'Patient2 Name: '.$dst_dicom->value(0x0010, 0x0010)."<br>\n"; // Patient Name if exists
+		
+	}
+	catch (Nanodicom_Exception $e)
+	{
+		echo 'File failed. '.$e->getMessage()."\n";
+		return;
+	}
+	
+	
+	foreach ($tags as $fname=>$field)
+	{
+		if(strlen($field)>0)
+		{
+			$tag_numbers=explode(",", $field);
+			
+			$value=$src_dicom->value(hexdec($tag_numbers[0]), hexdec($tag_numbers[1]));
+			
+			echo $fname.'->'.$field."(".$tag_numbers[0].",".$tag_numbers[1].")="
+				.$value
+			."<br>\n";
+			$dst_dicom->value(hexdec($tag_numbers[0]), hexdec($tag_numbers[1]), $value, true);
+			//$dst_dicom	
+			echo "new value=".$dst_dicom->value(hexdec($tag_numbers[0]), hexdec($tag_numbers[1]))."<br>\n";	
+		}
+	}
+	
+	try 
+	{
+		echo $dst_dicom->write_file($dst_file.'_2.dcm')->profiler_diff('write')."\n";
+	}
+	catch (Nanodicom_Exception $e)
+	{
+		echo '<br>Write file failed. '.$e->getMessage()."\n";
+		return;
+	}
+	
+	/*
+	// 1) Workaround to create new elements for Nanodicom
+	try
+	{
+		$dicom = Nanodicom::factory($filename, 'anonymizer');
+		// Set Value (Patient Name here)
+		$dicom->value(0x0010, 0x0010, 'JKD');
+		//$dicom->value(0x0010, 0x0010, 'JKD'); Others as well
+		$tags = array(
+				array(0xF0ED, 0xF0ED, 'id{random}'),	// Non-existing tag. Sorry, needs one at least
+		);
+		$replacements = array(
+				array(0x0010, 0x0010, 'JKD', 'JKD'),
+				// array(0x0010, 0x0010, 'JKD', 'JKD'), Whatever was used above should be added here. Same value to be saved should be set for both last parameters
+		);
+		// Save the file with same name
+		file_put_contents($filename, $dicom->anonymize($tags, $replacements));
+	}
+	catch (Nanodicom_Exception $e)
+	{
+		echo 'File failed. '.$e->getMessage()."\n";
+	}
+	*/
+	
+}
+
+function copy_dicom_tags_with_modify($src_file, $dst_file, $tags)
+{
+	global $dicom_config;
+	global $debug;
+	
+	if(strlen($src_file)==0
+			|| strlen($dst_file)==0
+			|| ! is_array($tags))
+		return;
+
+	$src_dicom=null;
+
+	try
+	{
+		$src_dicom = Nanodicom::factory($src_file);
+		$src_dicom->parse();
+
+		//echo 'SRC Is DICOM? '.$src_dicom->is_dicom()."<br>\n";
+		//echo 'Patient Name: '.$src_dicom->value(0x0010, 0x0010)."<br>\n"; // Patient Name if exists
+
+	}
+	catch (Nanodicom_Exception $e)
+	{
+		echo 'File failed. '.$e->getMessage()."\n";
+		return;
+	}
+
+
+	foreach ($tags as $fname=>$field)
+	{
+		if(strlen($field)>0)
+		{
+			$tag_numbers=explode(",", $field);
+				
+			$value=$src_dicom->value(hexdec($tag_numbers[0]), hexdec($tag_numbers[1]));
+			
+			if($debug)
+				echo $fname.'->'.$field."(".$tag_numbers[0].",".$tag_numbers[1].")=".$value."<br>\n";
+			
+			if(strlen($value)>0)
+			{
+				$cmd=$dicom_config["DCMODIFY"].' -i "('.$field.')='.$value.'" '.$dst_file." 2>&1";
+					
+				$output = shell_exec($cmd);
+				if($debug)
+				{
+					echo "<br>cmd=".$cmd;
+					echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
+				}
+			}
+		}
+	}
+
+}
 
 function get_column_visibility($name, $default = 1)
 {
