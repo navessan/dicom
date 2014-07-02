@@ -544,8 +544,12 @@ where Image.SeriesInstanceUID='".$uid."'";
 			
 			,"StudyDate"=>'0008,0020'
 			,"SeriesDate"=>'0008,0021'
+			,"AcquisitionDate"=>'0008,0022'
+			,"ContentDate"=>'0008,0023'
 			,"StudyTime"=>'0008,0030'
 			,"SeriesTime"=>'0008,0031'
+			,"AcquisitionTime"=>'0008,0032'
+			,"ContentTime"=>'0008,0033'
 			,"AccessionNumber"=>'0008,0050'
 			,"Manufacturer"=>'0008,0070'
 			,"InstitutionName"=>'0008,0080'
@@ -559,18 +563,24 @@ where Image.SeriesInstanceUID='".$uid."'";
 			,"DataCollectionDiameter"=>'0018,0090'
 			,"ProtocolName"=>'0018,1030'
 			,"ReconstructionDiameter"=>'0018,1100'
+			,"GantryDetectorTilt"=>'0018,1120'
+			,"TableHeight"=>'0018,1130'
+			,"RotationDirection"=>'0018,1140'
 			,"ExposureTime"=>'0018,1150'
 			,"XRayTubeCurrent"=>'0018,1151'
 			,"Exposure"=>'0018,1152'
 			,"GeneratorPower"=>'0018,1170'
+			,"ConvolutionKernel"=>'0018,1210'
 			,"PatientPosition"=>'0018,5100'
+			,"CTDIvol"=>'0018,9345'
 			
-			,"StudyInstanceUID"=>'0020,000D'
-			,"SeriesInstanceUID"=>'0020,000E'
+			//,"StudyInstanceUID"=>'0020,000D'
+			//,"SeriesInstanceUID"=>'0020,000E'
 			,"StudyID"=>'0020,0010'			
 			,"SeriesNumber"=>'0020,0011'
-			,"InstanceNumber"=>'0020,0013'
-			,"FrameOfReferenceUID"=>'0020,0052'	
+			//,"InstanceNumber"=>'0020,0013'
+			,"PatientOrientation"=>'0020,0020'
+			//,"FrameOfReferenceUID"=>'0020,0052'	
 	);
 	
 	$src=$dicom_config["DICOMROOT"]."\\".$StudyInstanceUID."\\".$SeriesInstanceUID."\\".$SOPInstanceUID.".dcm";
@@ -701,7 +711,8 @@ function copy_dicom_tags_with_modify($src_file, $dst_file, $tags)
 		return;
 
 	$src_dicom=null;
-
+	
+	//read src file
 	try
 	{
 		$src_dicom = Nanodicom::factory($src_file);
@@ -717,7 +728,9 @@ function copy_dicom_tags_with_modify($src_file, $dst_file, $tags)
 		return;
 	}
 
-
+	//create string with tags
+	$str='';
+	
 	foreach ($tags as $fname=>$field)
 	{
 		if(strlen($field)>0)
@@ -731,16 +744,33 @@ function copy_dicom_tags_with_modify($src_file, $dst_file, $tags)
 			
 			if(strlen($value)>0)
 			{
-				$cmd=$dicom_config["DCMODIFY"].' -i "('.$field.')='.$value.'" '.$dst_file." 2>&1";
+				$str.=' -i "('.$field.')='.$value.'"';
 					
-				$output = shell_exec($cmd);
-				if($debug)
-				{
-					echo "<br>cmd=".$cmd;
-					echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
-				}
 			}
+			//some tags cannot be written, check it separately
+			/*
+			$cmd=$dicom_config["DCMODIFY"].$str.' '.$dst_file." 2>&1";
+			$output = shell_exec($cmd);
+			if($debug)
+			{
+				echo "<br>cmd=".$cmd;
+				echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
+			}
+			 */
 		}
+	}
+	
+	//write all tags at once with dcmodify
+	if(strlen($str)==0)
+		return;
+	
+	$cmd=$dicom_config["DCMODIFY"].$str.' '.$dst_file." 2>&1";
+		
+	$output = shell_exec($cmd);
+	if($debug)
+	{
+		echo "<br>cmd=".$cmd;
+		echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
 	}
 
 }
