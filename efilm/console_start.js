@@ -10,7 +10,7 @@
 var REMOTE_DB_CONNECTION_STRING="DRIVER=MySQL ODBC 5.3 ANSI Driver;" +
 		"SERVER=192.168.10.65;" +
 		"DATABASE=conquest;" +
-		"UID=web;PWD=CHANGEME";
+		"UID=web;PWD=CHANGEME;charset=latin1";//CHANGEME
 
 var LOCAL_DB_CONNECTION_STRING="Provider=sqlncli;Data Source=localhost;" +
 		"Initial Catalog = eFilmWorkstation;" +
@@ -61,15 +61,23 @@ function load_sql(strConnection, strSQL)
 	rs.Open(strSQL, connection);
 	if(!rs.eof)
 		rs.MoveFirst;
+
+	var result = new Array();
+	var i=0;
+	
 	while(!rs.eof)
 	{
-	   WScript.echo(rs.fields(0));
-	   rs.movenext;
+		result[i]=""+rs.fields(0);		//string
+		//WScript.echo(rs.fields(0));
+		//WScript.echo("i="+i+"\t var="+result[i]);
+		i++;
+		rs.movenext;
 	}
-
+	
 	rs.close;
-	WScript.Quit(0);
-
+	connection.Close();
+	
+	return result;
 }
 
 
@@ -150,29 +158,40 @@ if (StudyDate != "" && m_strPatientID=="")
 if (m_strImageSourceUIDs == "" || (m_strStudyUIDs == "" && m_strPatientID == "" && m_strAccNums == ""))
     usage();
 
-if (StudyDate != "")
+if (StudyDate != "" && m_strAccNums != "")
 {
-	if(m_strAccNums != "")
-		WScript.Echo("The accession number is already set to \""+m_strAccNums+"\", ignoring StudyDate");
-	if(m_strStudyUIDs != "")
-		WScript.Echo("The study instance UID is already set to \""+m_strStudyUIDs+"\", ignoring StudyDate");
-	//else what?
-		
+	WScript.Echo("The accession number is already set to \""+m_strAccNums+"\", ignoring StudyDate");
+}
+else 
+if(StudyDate != "" && m_strStudyUIDs != "")
+	WScript.Echo("The study instance UID is already set to \""+m_strStudyUIDs+"\", ignoring StudyDate");
+else 
+if(StudyDate != "")
+{		
 	//we need to find StudyUID from SQL database by patient and date
 	
 	//m_strPatientID=sql_escape(m_strPatientID);
 	//StudyDate=sql_escape(StudyDate);
 	
+	var re = /([:;.,])/g;	//regexp for remove :;., 
+	StudyDate=StudyDate.replace(re, "");
+	
+	if(StudyDate == "")
+	{
+		WScript.Echo("StudyDate has wrong format");
+		WScript.Quit(1);
+	}
+	
 	var strConnection="";
 	var strSQL="";
-	
+
 	if(m_strImageSourceUIDs==EFILM_LOCAL)
 	{
 		strConnection=LOCAL_DB_CONNECTION_STRING;		
 
 		strSQL="SELECT StudyInstanceUID  " +
 		"FROM Study " +
-		"where PatientID='"+m_strPatientID+"' " +
+		"where PatientID=N'"+m_strPatientID+"' " +
 		"and StudyDate='"+StudyDate+"' ";
 	}
 	else if(m_strImageSourceUIDs ==EFILM_REMOTE)
@@ -189,9 +208,35 @@ if (StudyDate != "")
 		WScript.Echo("Unknown Source "+m_strImageSourceUIDs+"\n");
 		usage();
 	}
-	
-	load_sql(strConnection, strSQL);
 
+	WScript.echo(strSQL);
+	var res=load_sql(strConnection, strSQL);
+	
+	WScript.echo("results");
+	for(var i=0;i<res.length;i++)
+	{
+		WScript.echo("i="+i+"\t var="+res[i]);
+	}
+	
+	if(null==res || res.length==0)
+	{
+		WScript.echo("Study UID not found, exiting...");
+		WScript.Quit(0);
+	}else
+	if(res.length==1)
+	{
+		m_strStudyUIDs=res[0];
+		m_strPatientID="";		//oleOpenStudy3 requires blank Patient ID and Accession Number
+		m_strAccNums="";
+	}
+	else
+	{
+		//TODO create strStudyListXML
+		WScript.echo("Multiple Study UID, exiting...");
+		WScript.Quit(0);
+	}	
+	
+	
 }
 
 var Efilm = new ActiveXObject("EFilm.Document");
