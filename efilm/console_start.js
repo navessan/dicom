@@ -34,7 +34,7 @@ function usage()
     WScript.quit(-1);
 }
 
-function load_sql(strConnection, strSQL)
+function load_sql_old(strConnection, strSQL)
 {
 	var connection = WScript.CreateObject("ADODB.connection");
 
@@ -80,23 +80,83 @@ function load_sql(strConnection, strSQL)
 	return result;
 }
 
+function load_sql(strConnection, strSQL)
+{
+	var connection = WScript.CreateObject("ADODB.connection");
 
-	var	    m_strAccNums;           //The accession number of the study to be opened.
-	var	    m_strPatientID;			//The Patient ID of the study to be opened.
-	var     m_strStudyUIDs;			//The study instance UID of the study to be opened.
+	try
+	{
+	WScript.echo ("opening...");
+	WScript.echo ("con="+strConnection);
+	connection.Open(strConnection);
+
+	}
+	catch(err)
+	{
+		msg="Connection error: \n" + err.number +"\n" + err.description;
+		WScript.echo (msg);
+		WScript.Quit(1);
+	}
+
+	var rs = new ActiveXObject("ADODB.Recordset");
+	
+	//rs.Open("select name from master..sysdatabases", connection);
+	//rs.Open(strSQL, connection);
+	rs=connection.Execute(strSQL);
+	
+	if(rs.eof )
+		return null;
+	
+	var result;
+	result=rs.GetRows.toArray();
+
+	rs.close;
+	connection.Close();
+		
+	return result;
+}
+
+function create_OpenStudyInfoXML(PatientID, array, source)
+{
+	//NOT IMPLEMEMENTED
+/*
+<AutomationOpenStudyInfo xmlns="urn:schemas-mergeefilm-com:hanging-protocol" PatientID="">
+	<AutomationStudy xmlns="urn:schemas-mergeefilm-com:hanging-protocol" AccessionNumber="20673" StudyUID=""/>
+	<AutomationStudy xmlns="urn:schemas-mergeefilm-com:hanging-protocol" AccessionNumber="20727" StudyUID=""/>
+	<AutomationImageSource xmlns="urn:schemas-mergeefilm-com:hanging-protocol" GUID="{0CBB4846-0868-4f42-8AC3-63F5B8822AF6}"/>
+</AutomationOpenStudyInfo>
+*/
+	strOpenStudyInfoXML=""+
+	"<AutomationOpenStudyInfo xmlns=\"urn:schemas-mergeefilm-com:hanging-protocol\" PatientID=\"" +PatientID+"\">";
+	
+	strOpenStudyInfoXML=strOpenStudyInfoXML+"\n"+
+	"	<AutomationStudy xmlns=\"urn:schemas-mergeefilm-com:hanging-protocol\" AccessionNumber=\"20673\" StudyUID=\"\"/>";
+	
+	strOpenStudyInfoXML=strOpenStudyInfoXML+"\n"+
+	"	<AutomationImageSource xmlns=\"urn:schemas-mergeefilm-com:hanging-protocol\" GUID=\""+source+"\"/>"+
+	+"</AutomationOpenStudyInfo>";
+	
+}
+
+	var	    m_strAccNums="";			//The accession number of the study to be opened.
+	var	    m_strPatientID="";			//The Patient ID of the study to be opened.
+	var		m_strStudyUIDs="";			//The study instance UID of the study to be opened.
 	var 	m_nLeft;
 	var 	m_nTop;
 	var 	m_nBottom;
 	var 	m_nRight;
-	var 	m_nSeriesCols;
-	var 	m_nSeriesRows;
-	var 	m_nImageCols;
-	var 	m_nImageRows;
-	var 	m_bAddToWindow;         //TRUE:	Adds study to currently open document.
-	var 	m_bCloseCurrentWindow;  //TRUE:	Closes current window and opens a new window for the new study.
-	var 	m_bImageFormat;         //TRUE:	Automatically format image layout based on number of images in each series.
-	var 	m_bSeriesFormat;        //TRUE:	Automatically format series layout based on the number of series in study.
-	var	    m_strImageSourceUIDs;
+	var 	m_nSeriesCols=0;			//Specifies the series format (rows, columns) in which the study should open.  
+	var 	m_nSeriesRows=0;
+	var 	m_nImageCols=0;				//Specifies the image format (rows, columns) in which each series in the study should open.  
+	var 	m_nImageRows=0;
+	var 	m_bAddToWindow=0;			//TRUE:	Adds study to currently open document.
+	var 	m_bCloseCurrentWindow=1;	//TRUE:	Closes current window and opens a new window for the new study.
+	var 	m_bImageFormat=1;			//TRUE:	Automatically format image layout based on number of images in each series.
+	var 	m_bSeriesFormat=1;      	//TRUE:	Automatically format series layout based on the number of series in study.
+	var	    m_strImageSourceUIDs="";	
+	
+	var 	strOpenStudyInfoXML="";		//The primary and related studies (if any) as an XML list.
+	var 	strProtocolListXML="";		//A list of potential protocols to apply to the study/studies.
 
 /*
 Local Exams	    {0CBB4846-0868-4f42-8AC3-63F5B8822AF6}
@@ -109,11 +169,6 @@ Image Channel	{2DC1E741-C299-4681-8ED0-C5185F30D11A}
 
 var	StudyDate;		//this parameter is not passed directly to efilm
 StudyDate="";
-	
-m_strAccNums="";
-m_strPatientID="";
-m_strStudyUIDs="";
-m_strImageSourceUIDs="";
 
 
 objArgs = WScript.Arguments;
@@ -189,7 +244,7 @@ if(StudyDate != "")
 	{
 		strConnection=LOCAL_DB_CONNECTION_STRING;		
 
-		strSQL="SELECT StudyInstanceUID  " +
+		strSQL="SELECT StudyInstanceUID, Modality  " +
 		"FROM Study " +
 		"where PatientID=N'"+m_strPatientID+"' " +
 		"and StudyDate='"+StudyDate+"' ";
@@ -198,7 +253,7 @@ if(StudyDate != "")
 	{
 		strConnection=REMOTE_DB_CONNECTION_STRING;
 		
-		strSQL="SELECT StudyInsta " +
+		strSQL="SELECT StudyInsta, StudyModal " +
 		"FROM dicomstudies " +
 		"WHERE PatientID='"+m_strPatientID+"' " +
 		"AND StudyDate='"+StudyDate+"' ";
@@ -212,31 +267,91 @@ if(StudyDate != "")
 	WScript.echo(strSQL);
 	var res=load_sql(strConnection, strSQL);
 	
-	WScript.echo("results");
-	for(var i=0;i<res.length;i++)
-	{
-		WScript.echo("i="+i+"\t var="+res[i]);
-	}
-	
 	if(null==res || res.length==0)
 	{
 		WScript.echo("Study UID not found, exiting...");
 		WScript.Quit(0);
 	}else
-	if(res.length==1)
+	if(res.length==1)		//old behavior
 	{
 		m_strStudyUIDs=res[0];
+		WScript.echo("Study UID="+m_strStudyUIDs);		
 		m_strPatientID="";		//oleOpenStudy3 requires blank Patient ID and Accession Number
 		m_strAccNums="";
 	}
 	else
 	{
-		//TODO create strStudyListXML
-		WScript.echo("Multiple Study UID, exiting...");
+		WScript.echo("Study UID with modality:");
+		
+		var res_count=0;
+		var col_cnt=2;		//column count for StudyInstanceUID, Modality
+		var i=0;
+		var x;
+		count=res.length;
+
+		//-------------------
+		var strRow="";
+		//debug output
+		while(i<count)
+		{
+			strRow="";
+			for(x=0;x<col_cnt;x++)
+			{
+				strRow=strRow+res[i+x]+"\t";
+			}
+			WScript.echo("i="+i+"\t "+strRow);
+			
+			i=i+x;
+		}
+		WScript.echo("count="+count);
+		//---------------
+		//opening studies here
+		m_strPatientID="";		//oleOpenStudy3 requires blank Patient ID and Accession Number
+		m_strAccNums="";
+		//m_nSeriesCols=
+		
+		var Efilm = new ActiveXObject("EFilm.Document");
+		
+		i=0;
+		modality="";
+		
+		while(i<count)
+		{
+			m_strStudyUIDs=res[i];
+			modality=res[i+1];
+			WScript.echo("Open StudyUID="+m_strStudyUIDs+"\t "+modality);
+			
+			if(modality=="CT" || modality=="MR"  || modality=="SR\\MR" )
+			{
+				m_bImageFormat=0;
+				m_bSeriesFormat=0;
+			}
+			else
+			{
+				m_bImageFormat=1;
+				m_bSeriesFormat=1;
+			}
+			
+			if (!Efilm.oleOpenStudy3(m_strPatientID, m_strAccNums, m_strStudyUIDs, 
+					m_bCloseCurrentWindow, m_bAddToWindow,
+					m_nSeriesRows, m_nSeriesCols, m_nImageRows, m_nImageCols, 
+					m_bSeriesFormat, m_bImageFormat, m_strImageSourceUIDs))
+			{
+				WScript.Echo("oleOpenStudy3 failed.");
+			}
+			else
+			{
+				WScript.Echo("oleOpenStudy3 OK.");
+				m_bCloseCurrentWindow=0;
+				m_bAddToWindow=1;
+			}
+
+			i=i+col_cnt;
+		}
+		
 		WScript.Quit(0);
 	}	
-	
-	
+		
 }
 
 var Efilm = new ActiveXObject("EFilm.Document");
@@ -245,9 +360,28 @@ var Efilm = new ActiveXObject("EFilm.Document");
 //Efilm.oleShowMainWindow(SW_SHOWNORMAL);
 //Efilm.oleShowSearchWindow(SW_SHOWNORMAL);
 
-m_bCloseCurrentWindow=1;
-m_bSeriesFormat=1;
-m_bImageFormat=1;
+m_bIncludeLayoutInfo=0;
+if (strOpenStudyInfoXML!="" && !m_bIncludeLayoutInfo)
+{
+	if (!Efilm.oleOpenStudy4(strOpenStudyInfoXML, 
+								m_bCloseCurrentWindow, 
+								m_bFindRelatedStudies, 
+								m_nNumPriors, 
+								strProtocolListXML))
+	{
+		WScript.echo("oleOpenStudy4 failed.");
+	}
+}
+else if(strOpenStudyInfoXML!="")
+{
+	if (!Efilm.oleOpenStudy5(strOpenStudyInfoXML, 
+								m_nSeriesRows, m_nSeriesCols, m_nImageRows, m_nImageCols,
+								m_bSuppressSearch, m_bCloseCurrentWindow, m_bFindRelatedStudies, m_nNumPriors,
+								m_bApplyProtocol, strProtocolListXML))
+	{
+		WScript.echo("oleOpenStudy5 failed.");
+	}
+}
 
 if (m_strImageSourceUIDs != "" && m_strStudyUIDs != "")
 {
