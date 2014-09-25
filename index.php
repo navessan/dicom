@@ -505,21 +505,52 @@ where Image.SeriesInstanceUID='".$uid."'";
 	echo "StudyInstanceUID=".$StudyInstanceUID." <br>\n";
 	echo "FrameOfReferenceUID=".$FrameOfReferenceUID." <br>\n";
 	
-	if(!isset($dicom_config["GDMTAR"]) or 0)
-	{
-		echo("GDMTAR is not set!");
-		return;
-	}
-		
-	//src="%dicomRoot%\%StudyUID%\%SeriesUID";
-	//gdcmtar -V -i %src% -o %dst%
-		
 	$src=$dicom_config["DICOMROOT"]."\\".$StudyInstanceUID."\\".$SeriesInstanceUID;
 	$dst=$dicom_config["TEMPDIR"];
 	
-	$cmd=$dicom_config["GDMTAR"]." -D -i ".$src." -o ".$dst." 2>&1";
-	echo "<br>cmd=".$cmd;
+	if(0)	//GDMTAR
+	{
+		if(!isset($dicom_config["GDMTAR"]))
+		{
+			echo("GDMTAR is not set!");
+			return;
+		}
+
+		//src="%dicomRoot%\%StudyUID%\%SeriesUID";
+		//gdcmtar -V -i %src% -o %dst%
+
+		$cmd=$dicom_config["GDMTAR"]." -D -i ".$src." -o ".$dst." 2>&1";
+
+		//result file here
+		$filename=$dst."\\".$StudyInstanceUID."\\".$SeriesInstanceUID."\\".$FrameOfReferenceUID."\\new.dcm";
+		
+	}
+	if(1)	//DCMULTI
+	{
+		//---------------
+		if(!isset($dicom_config["DCMULTI"]))
+		{
+			echo("DCMULTI is not set!");
+			//return;
+		}
+		else
+		{
+			//result file here
+			$filename=$dst."\\multi_out.dcm";
+			
+			//convert MS-DOS style path to CYGWIN environment
+			$src=str_replace("\\", "/", $src);
+			//$filename=str_replace("\\", "/", $filename);
+			
+			//dcmulti * -verbose -sortby InstanceNumber -descending> /tmp/image2.dcm
+			$cmd=$dicom_config["DCMULTI"]." ".$src."/* -verbose -sortby InstanceNumber -descending >".$filename." 2>".$dst."\out.log";
+			
+		}
+
+	}
 	
+	//processing data with selected tool
+	echo "<br>cmd=".$cmd;
 	$output = shell_exec($cmd);
 	echo "<p>$output</p>";
 	
@@ -528,7 +559,6 @@ where Image.SeriesInstanceUID='".$uid."'";
 	//$output = shell_exec($cmd);
 	//echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
 	
-	$filename=$dicom_config["TEMPDIR"]."\\".$StudyInstanceUID."\\".$SeriesInstanceUID."\\".$FrameOfReferenceUID."\\new.dcm";
 	
 	if(!file_exists($filename))
 	{
@@ -542,6 +572,7 @@ where Image.SeriesInstanceUID='".$uid."'";
 			,"PatientsBirthDate"=>'0010,0030'
 			,"PatientsSex"=>'0010,0040'
 			
+			,"ImageType"=>'0008,0008'
 			,"StudyDate"=>'0008,0020'
 			,"SeriesDate"=>'0008,0021'
 			,"AcquisitionDate"=>'0008,0022'
@@ -574,13 +605,20 @@ where Image.SeriesInstanceUID='".$uid."'";
 			,"PatientPosition"=>'0018,5100'
 			,"CTDIvol"=>'0018,9345'
 			
-			//,"StudyInstanceUID"=>'0020,000D'
-			//,"SeriesInstanceUID"=>'0020,000E'
+			,"StudyInstanceUID"=>'0020,000D'
+			,"SeriesInstanceUID"=>'0020,000E'
 			,"StudyID"=>'0020,0010'			
 			,"SeriesNumber"=>'0020,0011'
-			//,"InstanceNumber"=>'0020,0013'
+			,"InstanceNumber"=>'0020,0013'
 			,"PatientOrientation"=>'0020,0020'
-			//,"FrameOfReferenceUID"=>'0020,0052'	
+			,"FrameOfReferenceUID"=>'0020,0052'	
+
+			//,"PlaneOrientationSequence"=>'0020,9116'
+			//,"ImageOrientationPatient"=>'0020,0037'
+			
+			,"PixelSpacing"=>'0028,0030'
+			,"WindowCenter"=>'0028,1050'
+			,"WindowWidth"=>'0028,1051'
 	);
 	
 	$src=$dicom_config["DICOMROOT"]."\\".$StudyInstanceUID."\\".$SeriesInstanceUID."\\".$SOPInstanceUID.".dcm";
@@ -598,6 +636,10 @@ where Image.SeriesInstanceUID='".$uid."'";
 		echo "<p>".iconv("CP866", "CP1251", $output)."</p>";
 	}
 	*/
+	
+	//Strip bad Windows filename characters
+	$row["SeriesDescription"]=str_replace(array("<", ">", ":", '"', "/", "\\", "|", "?", "*")
+					, ' ', $row["SeriesDescription"]);
 	
 	//moving file
 	$cmd='copy '.$filename .' "'.$dicom_config["OUTDIR"]."\\"
@@ -738,6 +780,7 @@ function copy_dicom_tags_with_modify($src_file, $dst_file, $tags)
 			$tag_numbers=explode(",", $field);
 				
 			$value=$src_dicom->value(hexdec($tag_numbers[0]), hexdec($tag_numbers[1]));
+			$value=$string = preg_replace( '/[^[:print:]]/', '',$value);	//some tags has wrong characters
 			
 			if($debug)
 				echo $fname.'->'.$field."(".$tag_numbers[0].",".$tag_numbers[1].")=".$value."<br>\n";

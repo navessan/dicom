@@ -10,6 +10,8 @@ You’ll need installed:
 	http://www.php.net/manual/en/book.sqlsrv.php
 3) Windows binaries of the Grassroots DICOM with gdcmtar tool 
 	http://sourceforge.net/projects/gdcm/
+	or dcmulti from dicom3tools software
+	http://www.dclunie.com/dicom3tools.html
 4) Windows binaries of the DCMTK with dcmodify tool
 	http://dicom.offis.de/dcmtk.php.en/
 5) check config.php	
