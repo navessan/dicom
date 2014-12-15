@@ -112,20 +112,40 @@ if (isset($_REQUEST['debug']))
 {
 	$debug=1;
 }
+//--------------------
+// $connectionInfo = array( "UID"=>$database_username,
+//                          "PWD"=>$database_password,
+//                          "Database"=>$database_default/*,
+// 						 "ReturnDatesAsStrings" => true*/);
 
-$connectionInfo = array( "UID"=>$database_username,
-                         "PWD"=>$database_password,
-                         "Database"=>$database_default/*,
-						 "ReturnDatesAsStrings" => true*/);
+// /* Connect using SQL Server Authentication. */
 
-/* Connect using SQL Server Authentication. */
-$conn = sqlsrv_connect( $database_hostname, $connectionInfo);
-if( $conn === false )
-{
-     echo "Unable to connect.</br>";
-     die( FormatErrors( sqlsrv_errors() ) );
+// $conn = sqlsrv_connect( $database_hostname, $connectionInfo);
+// if( $conn === false )
+// {
+//      echo "Unable to connect.</br>";
+//      die( FormatErrors( sqlsrv_errors() ) );
+// }
+//----------------------
+
+if($database_type=="sqlsrv")
+	$dsn = "$database_type:server=$database_hostname;database=$database_default";
+else 	
+	$dsn = "$database_type:host=$database_hostname;dbname=$database_default;charset=$database_charset";
+
+
+$opt = array(
+		PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+		PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+);
+
+try {
+	$conn = new PDO($dsn, $database_username, $database_password, $opt);
 }
+catch(PDOException $e) {
+	die($e->getMessage());
 
+}
 
 //-------------------
 if(isset($debug))
@@ -157,6 +177,14 @@ $fields_array=array(
 				,"visible"=>0)
 );
 
+if(isset($conquest))
+	$fields_search_array=array(
+			array("post"=>'PatientID',"sql"=>'PatientID',"name"=>"PatientID","value"=>"","html"=>"<br>","type"=>"text"),
+			array("post"=>'PatientsName',"sql"=>"PatientNam","name"=>"PatientsName","value"=>"","type"=>"text"),
+			array("post"=>'StudyDate',"sql"=>"StudyDate","name"=>"StudyDate","value"=>"","type"=>"text"),
+			array("post"=>'ProtocolName',"sql"=>"ProtocolNa","name"=>"ProtocolName","value"=>"","html"=>"<br>","type"=>"text")
+			);
+else
 $fields_search_array=array(
 array("post"=>'PatientID',"sql"=>'Patient.PatientID',"name"=>"PatientID","value"=>"","html"=>"<br>","type"=>"text"),
 array("post"=>'PatientsName',"sql"=>"PatientsName","name"=>"PatientsName","value"=>"","type"=>"text"),
@@ -189,7 +217,7 @@ echo '		<input type=submit name=send value=search>
 	</form>';
 
 
-$sql_where="";
+$sql_where="Series.Modality='CT'";
 
 foreach ($fields_search_array as $field)
 {
@@ -205,10 +233,32 @@ if(isset($debug))
 	if($debug==1) echo $sql_where;
 
 
-$top_count=60;
+$top_count=10;
 
 /* Set up and execute the query. */
 //--------------------------------------
+if(isset($conquest))
+	$tsql="SELECT 
+	PatientID
+      ,	PatientNam PatientsName
+      ,	PatientBir PatientsBirthDate
+      ,	PatientSex
+
+      ,Study.StudyInsta StudyInstanceUID
+      ,Study.StudyDate
+      ,Study.StudyID
+      ,Study.StudyModal Modality
+
+,Series.SeriesNumb SeriesNumber
+,Series.ProtocolNa ProtocolName
+,Series.SeriesDesc SeriesDescription
+,Series.SeriesInst SeriesInstanceUID
+,Series.FrameOfRef FrameOfReferenceUID
+,(select count(*) from DicomImages Image where Image.SeriesInst=Series.SeriesInst) imagesCount
+  FROM DicomStudies Study
+join DicomSeries Series on Study.StudyInsta=Series.StudyInsta";
+	
+else
 $tsql = "SELECT top $top_count
 Patient.[PatientID]
       ,Patient.[PatientsName]
@@ -240,12 +290,16 @@ if(strlen($sql_where)>0)
 
 $tsql.="\n order by PatientsName";
 
+if($database_type=="mysql")
+	$tsql.="\n limit $top_count;";
+
 
 /*Execute the query with a scrollable cursor so
   we can determine the number of rows returned.*/
 //$cursorType = array("Scrollable" => SQLSRV_CURSOR_KEYSET);
 //$stmt = sqlsrv_query( $conn, $tsql,null,$cursorType);
 
+/*
 $stmt = sqlsrv_query($conn, $tsql);
 
 if( $stmt === false)
@@ -253,19 +307,36 @@ if( $stmt === false)
      echo "Error in query preparation/execution.\n";
      die( FormatErrors( sqlsrv_errors() ) );
 }
+*/
+$stmt = $conn->query($tsql);
+$rows = $stmt->fetchAll();
 
-if(sqlsrv_has_rows($stmt))
+$numRows = count($rows);
+echo "<p>$numRows Row" . ($numRows == 1 ? "" : "s") . " Returned </p>";
+
+//if(sqlsrv_has_rows($stmt))
+if($numRows>0)
 {
-	$numRows = sqlsrv_num_rows($stmt);
-	echo "<p>$numRows Row" . ($numRows == 1 ? "" : "s") . " Returned </p>";
+// 	$numRows = sqlsrv_num_rows($stmt);
+// 	echo "<p>$numRows Row" . ($numRows == 1 ? "" : "s") . " Returned </p>";
 	
 	print '<table cellspacing="0" cellpadding="1" border="1" align="center"
 	width="100%">
 	<tbody>';
 	echo '<tr>';
 	
-	$metadata=sqlsrv_field_metadata($stmt);
+	//$metadata=sqlsrv_field_metadata($stmt);
 	
+	$metadata=array();
+	$i=0;
+	// add the table headers
+	foreach ($rows[0] as $key => $useless){
+		//print "<th>$key</th>";
+		$metadata[$i]['Name']=$key;
+		$i++;
+	}
+	
+	//print_r($metadata);
 	$column_name="";
 
 	//internal column names
@@ -296,7 +367,8 @@ if(sqlsrv_has_rows($stmt))
 
 
 	/* Retrieve each row as an associative array and display the results.*/
-	while( $row = sqlsrv_fetch_array( $stmt, SQLSRV_FETCH_ASSOC))
+//	while( $row = sqlsrv_fetch_array( $stmt, SQLSRV_FETCH_ASSOC))
+	foreach ($rows as $row)
 	{
 		$rowColor='White';
 		echo '<tr bgcolor="' . $rowColor . '">';
@@ -345,10 +417,10 @@ else
 	echo "No rows returned.";
 }
 /* Free statement and connection resources. */
-sqlsrv_free_stmt( $stmt);
-sqlsrv_close( $conn);
+//sqlsrv_free_stmt( $stmt);
+//sqlsrv_close( $conn);
 
-function process_series($conn,$uid)
+function process_series_OLD($conn,$uid)
 {
 	$uid=trim(sanitize_search_string($uid));
 	
@@ -464,21 +536,26 @@ join Series on Study.StudyInstanceUID=ReferencedStudyComponent
 join Image on Image.SeriesInstanceUID=Series.SeriesInstanceUID
 where Image.SeriesInstanceUID='".$uid."'";
 
-	$stmt = sqlsrv_query($conn, $tsql);
+// 	$stmt = sqlsrv_query($conn, $tsql);
 
-	if( $stmt === false)
-	{
-		echo "Error in query preparation/execution.\n";
-		die( FormatErrors( sqlsrv_errors() ) );
-	}
+// 	if( $stmt === false)
+// 	{
+// 		echo "Error in query preparation/execution.\n";
+// 		die( FormatErrors( sqlsrv_errors() ) );
+// 	}
+
+	$stmt = $conn->query($tsql);
+	$rows = $stmt->fetchAll();
 	
 	$res=null;
 	$row=null;
 
-	if(sqlsrv_has_rows($stmt))
+//	if(sqlsrv_has_rows($stmt))
+	if(count($rows)>0)
 	{
 		/* Retrieve each row as an associative array and display the results.*/
-		while( $row = sqlsrv_fetch_array( $stmt, SQLSRV_FETCH_ASSOC))
+		//while( $row = sqlsrv_fetch_array( $stmt, SQLSRV_FETCH_ASSOC))
+		foreach ($rows as $row)
 		{
 			$SOPInstanceUID=$row["SOPInstanceUID"];
 			$SeriesInstanceUID=$row["SeriesInstanceUID"];
@@ -495,7 +572,7 @@ where Image.SeriesInstanceUID='".$uid."'";
 		return;
 	}
 	/* Free statement and connection resources. */
-	sqlsrv_free_stmt( $stmt);
+	//sqlsrv_free_stmt( $stmt);
 	
 	$row=$res;
 	//print_r($row);
@@ -512,7 +589,7 @@ where Image.SeriesInstanceUID='".$uid."'";
 	{
 		if(!isset($dicom_config["GDMTAR"]))
 		{
-			echo("GDMTAR is not set!");
+			echo("GDMTAR is not set!\n");
 			return;
 		}
 
@@ -530,7 +607,7 @@ where Image.SeriesInstanceUID='".$uid."'";
 		//---------------
 		if(!isset($dicom_config["DCMULTI"]))
 		{
-			echo("DCMULTI is not set!");
+			echo("DCMULTI is not set!\n");
 			//return;
 		}
 		else
@@ -562,7 +639,7 @@ where Image.SeriesInstanceUID='".$uid."'";
 	
 	if(!file_exists($filename))
 	{
-		echo "file ".$filename." not created!";
+		echo "file ".$filename." not created!\n";
 		return;
 	}
 		
@@ -637,12 +714,23 @@ where Image.SeriesInstanceUID='".$uid."'";
 	}
 	*/
 	
+	//REMOTE_ADDR
+	$out_dir="\\\\".$_SERVER["REMOTE_ADDR"]."\\planmeca\\images\\";
+	
+	if(!file_exists($out_dir))
+	{
+		echo "ERROR: The directory $out_dir doesn't exist! <br>\n";
+		$out_dir=$dicom_config["OUTDIR"];
+	}	
+		
+	echo "Output file in: ".$out_dir." <br>\n";
+	
 	//Strip bad Windows filename characters
 	$row["SeriesDescription"]=str_replace(array("<", ">", ":", '"', "/", "\\", "|", "?", "*")
 					, ' ', $row["SeriesDescription"]);
 	
 	//moving file
-	$cmd='copy '.$filename .' "'.$dicom_config["OUTDIR"]."\\"
+	$cmd='copy '.$filename .' "'.$out_dir."\\"
 						.$PatientsName." "
 						//.$row["StudyDate"]." "
 						.$row["SeriesDescription"]
