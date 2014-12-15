@@ -1,12 +1,22 @@
 <?php
 
 /* make sure these values refect your actual database/host/user/password */
-$database_type = "mssql";
+$database_type = "sqlsrv";//"mssql";
 $database_hostname = "dev-srv2";
 $database_default = "eFilmWorkstation";
 $database_username = "sa";
 $database_password = "eFilmWS30";
 $database_port = "";
+
+// $conquest=1;
+
+// $database_type = "mysql";
+// $database_hostname = "192.168.10.65";
+// $database_default = "conquest";
+// $database_username = "web";
+// $database_password = "CHANGEME";
+// $database_charset= "latin1";
+// $database_port = "";
 
 
 $dicom_config=array(
